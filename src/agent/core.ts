@@ -4,6 +4,7 @@ import { config } from "dotenv";
 import { fileTools } from "./tools/file-tools";
 import { dbTools } from "./tools/db-tools";
 import { apiTools } from "./tools/api-tools";
+import { integrationTools } from "./tools/integration-tools";
 import { SYSTEM_PROMPTS } from "./prompts/system-prompts";
 
 // Load environment variables from .env.local
@@ -14,11 +15,12 @@ export async function databaseAgent(prompt: string, context?: any) {
     model: google("gemini-1.5-flash"),
     prompt,
     system: SYSTEM_PROMPTS.DATABASE_AGENT,
-    stopWhen: stepCountIs(10),
+    stopWhen: stepCountIs(15), // Increased for more complex operations
     tools: {
       ...fileTools,
       ...dbTools,
       ...apiTools,
+      ...integrationTools, // Added integration tools
     },
   });
 

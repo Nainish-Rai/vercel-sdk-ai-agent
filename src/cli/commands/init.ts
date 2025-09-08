@@ -1,86 +1,68 @@
-import { logger } from "../utils/logger";
 import { createSpinner } from "../utils/spinner";
-import fs from "fs";
-import inquirer from "inquirer";
+import { logger } from "../utils/logger";
 import chalk from "chalk";
+import fs from "fs";
+import path from "path";
 
-export async function initCommand() {
-  logger.info("Initializing database setup for your Next.js project...");
+interface InitOptions {
+  force?: boolean;
+}
+
+export async function initCommand(options: InitOptions = {}) {
+  const { force } = options;
+
+  console.log(chalk.blue.bold("\n🚀 Initializing Database Agent Setup...\n"));
+
+  const spinner = createSpinner("Setting up database infrastructure...");
 
   try {
-    // Check if .env.local exists
-    const envExists = fs.existsSync(".env.local");
+    spinner.start();
 
-    if (!envExists) {
-      logger.warn("No .env.local file found. Creating one...");
-
-      const answers = await inquirer.prompt([
-        {
-          type: "input",
-          name: "databaseUrl",
-          message: "Enter your PostgreSQL database URL:",
-          validate: (input) => {
-            if (!input.startsWith("postgresql://")) {
-              return "Please enter a valid PostgreSQL URL (starting with postgresql://)";
-            }
-            return true;
-          },
-        },
-        {
-          type: "input",
-          name: "geminiApiKey",
-          message: "Enter your Google Gemini API key:",
-          validate: (input) => {
-            if (!input.trim()) {
-              return "API key is required";
-            }
-            return true;
-          },
-        },
-      ]);
-
-      const envContent = `# Database
-DATABASE_URL=${answers.databaseUrl}
-
-# AI
-GOOGLE_GENERATIVE_AI_API_KEY=${answers.geminiApiKey}
-
-# Development
-NODE_ENV=development
-`;
-
-      fs.writeFileSync(".env.local", envContent);
-      logger.success("Created .env.local file with your configuration");
-    } else {
-      logger.info("Found existing .env.local file");
+    // Check if this is a Next.js project
+    if (!fs.existsSync("package.json")) {
+      spinner.fail("Not a valid Node.js project");
+      logger.error(
+        "package.json not found. Make sure you're in a Next.js project directory."
+      );
+      process.exit(1);
     }
 
-    // Create Drizzle config if it doesn't exist
-    if (!fs.existsSync("drizzle.config.ts")) {
-      const drizzleConfig = `import { defineConfig } from "drizzle-kit";
-import { config } from "dotenv";
-
-config({ path: ".env.local" });
-
-export default defineConfig({
-  schema: "./src/database/schemas/*",
-  out: "./src/database/migrations",
-  dialect: "postgresql",
-  dbCredentials: {
-    url: process.env.DATABASE_URL!,
-  },
-});
-`;
-
-      fs.writeFileSync("drizzle.config.ts", drizzleConfig);
-      logger.success("Created drizzle.config.ts");
+    const packageJson = JSON.parse(fs.readFileSync("package.json", "utf-8"));
+    if (!packageJson.dependencies?.next) {
+      spinner.fail("Not a Next.js project");
+      logger.error(
+        "This doesn't appear to be a Next.js project. The agent is designed for Next.js projects."
+      );
+      process.exit(1);
     }
 
-    // Create database connection if it doesn't exist
-    if (!fs.existsSync("src/database/connection.ts")) {
-      const spinner = createSpinner("Setting up database connection...");
-      spinner.start();
+    spinner.stop();
+    logger.success("✅ Valid Next.js project detected");
 
+    // Create directory structure
+    const directories = [
+      "src/database",
+      "src/database/schemas",
+      "src/database/migrations",
+      "src/database/seeds",
+      "src/hooks",
+      "src/types",
+      "src/app/api",
+    ];
+
+    logger.info("\n📁 Creating directory structure...");
+    directories.forEach((dir) => {
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+        logger.success(`Created: ${dir}`);
+      } else {
+        logger.info(`Exists: ${dir}`);
+      }
+    });
+
+    // Create database connection file
+    const connectionPath = "src/database/connection.ts";
+    if (!fs.existsSync(connectionPath) || force) {
       const connectionContent = `import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { config } from 'dotenv';
@@ -95,27 +77,119 @@ const client = postgres(process.env.DATABASE_URL);
 export const db = drizzle(client);
 `;
 
-      if (!fs.existsSync("src/database")) {
-        fs.mkdirSync("src/database", { recursive: true });
-      }
-
-      fs.writeFileSync("src/database/connection.ts", connectionContent);
-      spinner.succeed("Database connection setup complete");
-    }
-
-    logger.success("🎉 Database agent initialization complete!");
-    logger.info("\nNext steps:");
-    console.log("1. Update your .env.local with correct database credentials");
-    console.log('2. Run: npm run agent:query "your database request"');
-    console.log(
-      '3. Example: npm run agent:query "Can you store the recently played songs in a table"'
-    );
-  } catch (error) {
-    if (error instanceof Error) {
-      logger.error("Initialization failed:", error.message);
+      fs.writeFileSync(connectionPath, connectionContent);
+      logger.success("✅ Created database connection file");
     } else {
-      logger.error("Initialization failed:", String(error));
+      logger.info("Database connection file already exists");
     }
+
+    // Create Drizzle config
+    const drizzleConfigPath = "drizzle.config.ts";
+    if (!fs.existsSync(drizzleConfigPath) || force) {
+      const drizzleConfig = `import type { Config } from 'drizzle-kit';
+import { config } from 'dotenv';
+
+config({ path: '.env.local' });
+
+export default {
+  schema: './src/database/schemas/*',
+  out: './src/database/migrations',
+  driver: 'pg',
+  dbCredentials: {
+    connectionString: process.env.DATABASE_URL!,
+  },
+} satisfies Config;
+`;
+
+      fs.writeFileSync(drizzleConfigPath, drizzleConfig);
+      logger.success("✅ Created Drizzle configuration");
+    } else {
+      logger.info("Drizzle config already exists");
+    }
+
+    // Create .env.local template if it doesn't exist
+    const envPath = ".env.local";
+    if (!fs.existsSync(envPath)) {
+      const envTemplate = `# Database Configuration
+DATABASE_URL=postgresql://username:password@host:port/database
+
+# AI Configuration
+GOOGLE_GENERATIVE_AI_API_KEY=your_gemini_api_key_here
+
+# Development
+NODE_ENV=development
+`;
+
+      fs.writeFileSync(envPath, envTemplate);
+      logger.success("✅ Created .env.local template");
+      logger.warning(
+        "⚠️  Please update .env.local with your actual database and API credentials"
+      );
+    } else {
+      logger.info(".env.local already exists");
+    }
+
+    // Add scripts to package.json if they don't exist
+    const requiredScripts = {
+      "db:generate": "drizzle-kit generate",
+      "db:migrate": "drizzle-kit migrate",
+      "db:studio": "drizzle-kit studio",
+      "agent:query": "tsx src/cli/index.ts query",
+      "agent:status": "tsx src/cli/index.ts status",
+    };
+
+    let scriptsAdded = false;
+    Object.entries(requiredScripts).forEach(([script, command]) => {
+      if (!packageJson.scripts[script] || force) {
+        packageJson.scripts[script] = command;
+        scriptsAdded = true;
+      }
+    });
+
+    if (scriptsAdded || force) {
+      fs.writeFileSync("package.json", JSON.stringify(packageJson, null, 2));
+      logger.success("✅ Added database scripts to package.json");
+    } else {
+      logger.info("Database scripts already exist in package.json");
+    }
+
+    // Display setup summary
+    console.log(
+      chalk.green.bold("\n🎉 Database Agent Initialization Complete!\n")
+    );
+
+    console.log(chalk.cyan.bold("📋 What was created:"));
+    console.log(chalk.white("• Database directory structure"));
+    console.log(chalk.white("• Drizzle ORM configuration"));
+    console.log(chalk.white("• Database connection setup"));
+    console.log(chalk.white("• Environment configuration template"));
+    console.log(chalk.white("• NPM scripts for database operations"));
+
+    console.log(chalk.yellow.bold("\n⚡ Next Steps:"));
+    console.log(
+      chalk.white("1. Update .env.local with your database credentials")
+    );
+    console.log(
+      chalk.white("2. Add your GOOGLE_GENERATIVE_AI_API_KEY to .env.local")
+    );
+    console.log(
+      chalk.white(
+        '3. Run your first query: npm run agent:query "Create a users table"'
+      )
+    );
+
+    console.log(chalk.blue.bold("\n💡 Example Queries:"));
+    console.log(
+      chalk.gray('• "Can you store the recently played songs in a table"')
+    );
+    console.log(chalk.gray('• "Create a table for user playlists with songs"'));
+    console.log(chalk.gray('• "Add an API endpoint for managing favorites"'));
+  } catch (error) {
+    spinner.fail("Initialization failed");
+    logger.error(
+      "Setup failed:",
+      error instanceof Error ? error.message : String(error)
+    );
     process.exit(1);
   }
 }

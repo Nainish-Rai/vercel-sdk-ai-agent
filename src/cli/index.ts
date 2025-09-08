@@ -13,17 +13,33 @@ config({ path: ".env.local" });
 
 const program = new Command();
 
+// Display banner
+console.log(
+  chalk.blue.bold(`
+╔══════════════════════════════════════════════════════════╗
+║                🤖 Orchids Database Agent                ║
+║              AI-Powered Database Assistant               ║
+╚══════════════════════════════════════════════════════════╝
+`)
+);
+
 program
-  .name("orchids-agent")
+  .name("orchids-db-agent")
   .description("AI-powered database agent for Next.js projects")
-  .version("1.0.0");
+  .version("1.0.0")
+  .on("command:*", () => {
+    logger.error(`Unknown command: ${program.args.join(" ")}`);
+    logger.info("Use --help to see available commands");
+    process.exit(1);
+  });
 
 program
   .command("init")
-  .description("Initialize database setup for your project")
-  .action(async () => {
+  .description("Initialize database setup for the project")
+  .option("-f, --force", "Force initialization even if files exist")
+  .action(async (options) => {
     try {
-      await initCommand();
+      await initCommand(options);
     } catch (error) {
       logger.error(
         "Init command failed:",
@@ -34,12 +50,13 @@ program
   });
 
 program
-  .command("query")
-  .description("Execute natural language database queries")
-  .argument("<text>", "Natural language description of what you want to do")
-  .action(async (text) => {
+  .command("query <text>")
+  .description("Execute a natural language database query")
+  .option("-v, --verbose", "Show detailed execution steps")
+  .option("-d, --dry-run", "Show what would be done without executing")
+  .action(async (text, options) => {
     try {
-      await queryCommand(text);
+      await queryCommand(text, options);
     } catch (error) {
       logger.error(
         "Query command failed:",
@@ -51,10 +68,11 @@ program
 
 program
   .command("status")
-  .description("Show current project status and setup progress")
-  .action(async () => {
+  .description("Show current database and project status")
+  .option("-a, --all", "Show detailed status including file analysis")
+  .action(async (options) => {
     try {
-      await statusCommand();
+      await statusCommand(options);
     } catch (error) {
       logger.error(
         "Status command failed:",
@@ -64,13 +82,11 @@ program
     }
   });
 
-// Show help by default if no command is provided
-program.action(() => {
-  console.log(chalk.cyan("🤖 Orchids Database Agent"));
-  console.log(
-    chalk.gray("AI-powered database management for Next.js projects\n")
-  );
-  program.help();
+// Handle graceful shutdown
+process.on("SIGINT", () => {
+  console.log("\n");
+  logger.info("Database agent interrupted. Goodbye! 👋");
+  process.exit(0);
 });
 
 // Parse command line arguments
