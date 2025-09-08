@@ -65,6 +65,7 @@
     "dotted-map": "^2.2.3",
     "drizzle-kit": "^0.31.4",
     "drizzle-orm": "^0.44.5",
+    "drizzle-zod": "^0.8.3",
     "embla-carousel-react": "^8.6.0",
     "input-otp": "^1.4.2",
     "inquirer": "^12.9.4",

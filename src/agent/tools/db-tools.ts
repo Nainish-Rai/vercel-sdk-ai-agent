@@ -9,7 +9,7 @@ const execAsync = promisify(exec);
 export const dbTools = {
   create_schema: tool({
     description:
-      "Generate a Drizzle ORM schema file for the specified table structure.",
+      "Generate a Drizzle ORM schema file for the specified table structure. This is step 1 of the database setup process - you MUST continue with generating and running migrations after this.",
     inputSchema: z.object({
       tableName: z.string().describe("Name of the table to create"),
       fields: z
@@ -109,6 +109,8 @@ export type New${
           tableName,
           path: filePath,
           fieldsCreated: fields.length,
+          nextStep:
+            "You must now run migrations to apply this schema to the database. Use the run_migration tool with action 'generate' followed by action 'migrate'.",
         };
       } catch (error) {
         return {
@@ -238,6 +240,215 @@ export const db = drizzle(client);
           error: error instanceof Error ? error.message : String(error),
         };
       }
+    },
+  }),
+
+  analyze_request: tool({
+    description:
+      "Analyze a user request to identify multiple entities that need separate database tables",
+    inputSchema: z.object({
+      userRequest: z.string().describe("The user's request to analyze"),
+    }),
+    execute: async ({ userRequest }) => {
+      console.log(`🔍 Analyzing request: "${userRequest}"`);
+
+      const entities = [];
+      const request = userRequest.toLowerCase();
+
+      // Check for music/playlist entities
+      if (request.includes("made for you")) {
+        entities.push({
+          name: "made_for_you_playlists",
+          description: "Personalized playlists curated for the user",
+          fields: [
+            { name: "title", type: "varchar", constraints: ["notNull"] },
+            { name: "description", type: "text" },
+            { name: "imageUrl", type: "varchar" },
+            { name: "playlistType", type: "varchar" },
+            { name: "trackCount", type: "integer" },
+          ],
+        });
+      }
+
+      if (
+        request.includes("popular albums") ||
+        request.includes("popular album")
+      ) {
+        entities.push({
+          name: "popular_albums",
+          description: "Popular albums trending or featured",
+          fields: [
+            { name: "title", type: "varchar", constraints: ["notNull"] },
+            { name: "artist", type: "varchar", constraints: ["notNull"] },
+            { name: "imageUrl", type: "varchar" },
+            { name: "releaseYear", type: "integer" },
+            { name: "genre", type: "varchar" },
+            { name: "popularity", type: "integer" },
+          ],
+        });
+      }
+
+      if (request.includes("recently played") || request.includes("recent")) {
+        entities.push({
+          name: "recently_played_songs",
+          description: "Songs recently played by the user",
+          fields: [
+            { name: "title", type: "varchar", constraints: ["notNull"] },
+            { name: "artist", type: "varchar", constraints: ["notNull"] },
+            { name: "album", type: "varchar" },
+            { name: "duration", type: "integer" },
+            { name: "playedAt", type: "timestamp", constraints: ["notNull"] },
+          ],
+        });
+      }
+
+      // Fallback for generic album requests
+      if (
+        (request.includes("album") && entities.length === 0) ||
+        (request.includes("albums") && entities.length === 0)
+      ) {
+        entities.push({
+          name: "albums",
+          description: "General album information",
+          fields: [
+            { name: "title", type: "varchar", constraints: ["notNull"] },
+            { name: "artist", type: "varchar", constraints: ["notNull"] },
+            { name: "imageUrl", type: "varchar" },
+            { name: "category", type: "varchar" },
+          ],
+        });
+      }
+
+      return {
+        success: true,
+        entitiesFound: entities.length,
+        entities,
+        recommendation:
+          entities.length > 1
+            ? "Multiple entities detected. Create separate tables for each."
+            : "Single entity detected.",
+      };
+    },
+  }),
+
+  create_multiple_schemas: tool({
+    description:
+      "Create multiple Drizzle schema files for different entities at once",
+    inputSchema: z.object({
+      entities: z
+        .array(
+          z.object({
+            name: z.string(),
+            description: z.string(),
+            fields: z.array(
+              z.object({
+                name: z.string(),
+                type: z.string(),
+                constraints: z.array(z.string()).optional(),
+              })
+            ),
+          })
+        )
+        .describe("Array of entities to create schemas for"),
+    }),
+    execute: async ({ entities }) => {
+      const results = [];
+
+      for (const entity of entities) {
+        try {
+          const schemaPath = `src/database/schemas/${entity.name}.ts`;
+          console.log(
+            `📝 Creating schema file '${schemaPath}' for ${entity.description}`
+          );
+
+          // Generate field definitions
+          const fieldDefinitions = entity.fields
+            .map((field) => {
+              let definition = `  ${field.name}: `;
+
+              switch (field.type) {
+                case "varchar":
+                  definition += "varchar(255)";
+                  break;
+                case "text":
+                  definition += "text()";
+                  break;
+                case "integer":
+                  definition += "integer()";
+                  break;
+                case "boolean":
+                  definition += "boolean()";
+                  break;
+                case "timestamp":
+                  definition += "timestamp()";
+                  break;
+                default:
+                  definition += "text()";
+              }
+
+              if (field.constraints) {
+                field.constraints.forEach((constraint) => {
+                  if (constraint === "notNull") definition += ".notNull()";
+                  if (constraint === "primaryKey")
+                    definition += ".primaryKey()";
+                });
+              }
+
+              return definition + ",";
+            })
+            .join("\n");
+
+          const tableName = entity.name;
+          const capitalizedName =
+            tableName.charAt(0).toUpperCase() + tableName.slice(1);
+
+          const schemaContent = `import { pgTable, serial, text, timestamp, varchar, integer, boolean } from "drizzle-orm/pg-core";
+import { createInsertSchema, createSelectSchema } from "drizzle-zod";
+
+export const ${tableName} = pgTable("${tableName}", {
+  id: serial("id").primaryKey(),
+${fieldDefinitions}
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Zod schemas for validation
+export const insert${capitalizedName}Schema = createInsertSchema(${tableName});
+export const select${capitalizedName}Schema = createSelectSchema(${tableName});
+
+export type Insert${capitalizedName} = typeof ${tableName}.$inferInsert;
+export type Select${capitalizedName} = typeof ${tableName}.$inferSelect;
+`;
+
+          // Ensure directory exists
+          const schemaDir = "src/database/schemas";
+          if (!fs.existsSync(schemaDir)) {
+            fs.mkdirSync(schemaDir, { recursive: true });
+          }
+
+          fs.writeFileSync(schemaPath, schemaContent);
+          results.push({
+            tableName,
+            path: schemaPath,
+            success: true,
+            description: entity.description,
+          });
+        } catch (e) {
+          console.error(`Error creating schema for ${entity.name}:`, e);
+          results.push({
+            tableName: entity.name,
+            success: false,
+            error: e.message,
+          });
+        }
+      }
+
+      return {
+        success: results.every((r) => r.success),
+        results,
+        totalCreated: results.filter((r) => r.success).length,
+        action: "create_multiple_schemas",
+      };
     },
   }),
 };
