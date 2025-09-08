@@ -1,5 +1,9 @@
 import { databaseAgent } from "../agent/core";
 import { logger } from "../cli/utils/logger";
+import { codingAgent } from "./agent";
+import dotenv from "dotenv";
+
+dotenv.config({ path: ".env.local" });
 
 async function testAgent() {
   logger.info("🧪 Testing database agent setup...");
@@ -33,3 +37,10 @@ async function testAgent() {
 }
 
 testAgent();
+
+// Test the database schema agent
+codingAgent(
+  "Create a users table schema with id (uuid), email (varchar), name (varchar), created_at (timestamp), and is_active (boolean). Then generate a migration for it."
+)
+  .then(console.log)
+  .catch(console.error);
