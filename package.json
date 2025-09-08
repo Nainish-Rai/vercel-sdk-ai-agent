@@ -6,7 +6,14 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio",
+    "agent:init": "tsx src/cli/index.ts init",
+    "agent:query": "tsx src/cli/index.ts query",
+    "agent:status": "tsx src/cli/index.ts status",
+    "agent:test": "tsx src/utils/test.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^2.0.13",
